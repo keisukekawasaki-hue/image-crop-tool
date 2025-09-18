@@ -172,6 +172,51 @@
             line-height: 1.4;
         }
 
+        /* 背景色選択 */
+        .background-options {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .bg-option {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s;
+            background: white;
+        }
+
+        .bg-option:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .bg-option.selected {
+            border-color: #667eea;
+            background: #f0f2ff;
+            box-shadow: 0 4px 10px rgba(102, 126, 234, 0.2);
+        }
+
+        .bg-option-icon {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+        }
+
+        .bg-option-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .bg-option-desc {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 2px;
+        }
+
         /* 圧縮設定のスタイル */
         .compression-toggle {
             display: flex;
@@ -413,12 +458,25 @@
             overflow: hidden;
             margin-bottom: 10px;
             cursor: pointer;
+            position: relative;
         }
 
         .result-image {
             width: 100%;
             height: 100%;
             object-fit: cover;
+        }
+
+        .format-badge {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: bold;
         }
 
         .image-info {
@@ -581,6 +639,10 @@
             .btn {
                 width: 100%;
             }
+
+            .background-options {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -608,6 +670,27 @@
                         <input type="number" id="bufferValue" class="slider-value" min="0" max="200" value="70">
                     </div>
                     <div class="setting-description">※検出位置から少し上を切り取り開始点とし、重要な部分の保護を行います</div>
+                </div>
+
+                <div class="setting-group">
+                    <label class="setting-label">背景色設定</label>
+                    <div class="background-options">
+                        <div class="bg-option selected" data-bg="original" onclick="selectBackground('original')">
+                            <div class="bg-option-icon">🎨</div>
+                            <div class="bg-option-label">オリジナル</div>
+                            <div class="bg-option-desc">元画像のまま</div>
+                        </div>
+                        <div class="bg-option" data-bg="black" onclick="selectBackground('black')">
+                            <div class="bg-option-icon">⬛</div>
+                            <div class="bg-option-label">黒背景</div>
+                            <div class="bg-option-desc">背景を黒に</div>
+                        </div>
+                        <div class="bg-option" data-bg="white" onclick="selectBackground('white')">
+                            <div class="bg-option-icon">⬜</div>
+                            <div class="bg-option-label">白背景</div>
+                            <div class="bg-option-desc">背景を白に</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="compression-toggle">
@@ -704,6 +787,7 @@
         let compressionEnabled = true; // デフォルトON
         let selectedImageIndexes = new Set();
         let currentPreviewIndex = 0;
+        let selectedBackground = 'original';
 
         // 初期化
         document.addEventListener('DOMContentLoaded', function() {
@@ -744,6 +828,15 @@
             });
             
             updateSliderBackground();
+        }
+
+        // 背景色選択
+        function selectBackground(bgType) {
+            selectedBackground = bgType;
+            document.querySelectorAll('.bg-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            document.querySelector(`[data-bg="${bgType}"]`).classList.add('selected');
         }
 
         // ファイル選択とドラッグ&ドロップの処理
@@ -913,50 +1006,46 @@
         }
 
         // 高品質画像圧縮関数
-        async function compressImageHighQuality(canvas, targetSizeKB = 499) {
+        async function compressImageHighQuality(canvas, targetSizeKB = 499, format = 'image/jpeg') {
             return new Promise((resolve) => {
                 const targetSizeBytes = targetSizeKB * 1024;
                 
+                // PNGの場合は圧縮品質パラメータが効かないため、JPEGに変換して圧縮
+                const useFormat = format === 'image/png' && compressionEnabled ? 'image/jpeg' : format;
+                
                 // まず高品質で試す
                 canvas.toBlob((blob) => {
-                    if (blob.size <= targetSizeBytes) {
-                        // すでに目標サイズ以下
-                        resolve({ blob, quality: 0.95 });
+                    if (blob.size <= targetSizeBytes || !compressionEnabled) {
+                        // すでに目標サイズ以下または圧縮無効
+                        resolve({ blob, quality: format === 'image/png' ? 1 : 0.95 });
                     } else {
                         // 品質を段階的に下げて最適値を探す
                         let qualities = [0.92, 0.88, 0.85, 0.82, 0.80, 0.75, 0.70, 0.65, 0.60];
-                        let bestBlob = null;
-                        let bestQuality = 0;
                         
                         function tryNextQuality(index) {
                             if (index >= qualities.length) {
-                                // すべて試した
-                                if (bestBlob) {
-                                    resolve({ blob: bestBlob, quality: bestQuality });
-                                } else {
-                                    // 最低品質で圧縮
-                                    canvas.toBlob((blob) => {
-                                        resolve({ blob, quality: 0.5 });
-                                    }, 'image/jpeg', 0.5);
-                                }
+                                // 最低品質で圧縮
+                                canvas.toBlob((blob) => {
+                                    resolve({ blob, quality: 0.5 });
+                                }, useFormat, 0.5);
                                 return;
                             }
                             
                             const q = qualities[index];
                             canvas.toBlob((blob) => {
                                 if (blob.size <= targetSizeBytes) {
-                                    // 目標達成、これが最高品質
+                                    // 目標達成
                                     resolve({ blob, quality: q });
                                 } else {
                                     // まだ大きい、次を試す
                                     tryNextQuality(index + 1);
                                 }
-                            }, 'image/jpeg', q);
+                            }, useFormat, q);
                         }
                         
                         tryNextQuality(0);
                     }
-                }, 'image/jpeg', 0.95);
+                }, useFormat, format === 'image/png' ? 1 : 0.95);
             });
         }
 
@@ -1021,6 +1110,10 @@
                 const ctx = canvas.getContext('2d');
                 const img = new Image();
                 
+                // 元の画像形式を判定
+                const originalFormat = file.type || 'image/jpeg';
+                const isPNG = originalFormat.includes('png');
+                
                 img.onload = async function() {
                     canvas.width = img.width;
                     canvas.height = img.height;
@@ -1037,19 +1130,36 @@
                     croppedCanvas.width = img.width;
                     croppedCanvas.height = croppedHeight;
                     
+                    // 背景色の設定
+                    if (selectedBackground !== 'original') {
+                        croppedCtx.fillStyle = selectedBackground === 'black' ? '#000000' : '#FFFFFF';
+                        croppedCtx.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
+                    }
+                    
+                    // 画像を描画
                     croppedCtx.drawImage(img, 0, marginY, img.width, croppedHeight, 0, 0, img.width, croppedHeight);
                     
-                    // 圧縮処理
+                    // 圧縮処理（元の形式を維持）
                     let finalBlob;
                     let wasCompressed = false;
+                    let outputFormat = originalFormat;
                     
                     if (compressionEnabled) {
-                        const compressionResult = await compressImageHighQuality(croppedCanvas, 499);
+                        const compressionResult = await compressImageHighQuality(croppedCanvas, 499, originalFormat);
                         finalBlob = compressionResult.blob;
                         wasCompressed = true;
+                        // 圧縮でJPEGに変換された場合
+                        if (isPNG && finalBlob.size > 499 * 1024) {
+                            outputFormat = 'image/jpeg';
+                        }
                     } else {
+                        // 圧縮なしの場合は元の形式を維持
                         finalBlob = await new Promise(resolve => {
-                            croppedCanvas.toBlob(resolve, 'image/jpeg', 0.95);
+                            if (isPNG) {
+                                croppedCanvas.toBlob(resolve, 'image/png');
+                            } else {
+                                croppedCanvas.toBlob(resolve, 'image/jpeg', 0.95);
+                            }
                         });
                     }
                     
@@ -1066,7 +1176,9 @@
                         processedSize: processedSize,
                         reductionPercent: reductionPercent,
                         marginRemoved: marginY,
-                        wasCompressed: wasCompressed
+                        wasCompressed: wasCompressed,
+                        format: isPNG ? 'PNG' : 'JPG',
+                        outputFormat: outputFormat
                     });
                 };
                 
@@ -1094,6 +1206,7 @@
                 processedItem.innerHTML = `
                     <div class="image-checkbox" onclick="toggleImageSelection(${index}, event)"></div>
                     <div class="image-container" onclick="showPreview(${index})">
+                        <span class="format-badge">${result.format}</span>
                         <img src="${result.processedUrl}" class="result-image" alt="処理済み画像">
                     </div>
                     <div class="image-info">
@@ -1110,6 +1223,7 @@
                 originalItem.className = 'image-item';
                 originalItem.innerHTML = `
                     <div class="image-container" onclick="showOriginalPreview('${result.originalUrl}', '${result.originalFile.name}', ${result.originalSize})">
+                        <span class="format-badge">${result.format}</span>
                         <img src="${result.originalUrl}" class="result-image" alt="元画像">
                     </div>
                     <div class="image-info">
@@ -1183,7 +1297,7 @@
             document.getElementById('previewImage').src = result.processedUrl;
             document.getElementById('previewFileName').textContent = result.originalFile.name;
             document.getElementById('previewFileSize').textContent = 
-                `${Math.round(result.processedSize / 1024)}KB (${result.reductionPercent}% 削減)`;
+                `${Math.round(result.processedSize / 1024)}KB (${result.reductionPercent}% 削減) [${result.format}]`;
             
             document.getElementById('previewModal').style.display = 'block';
         }
@@ -1223,8 +1337,9 @@
                 const result = processedImages[index];
                 const url = result.processedUrl;
                 const a = document.createElement('a');
+                const ext = result.format === 'PNG' ? '.png' : '.jpg';
                 a.href = url;
-                a.download = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed.jpg';
+                a.download = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed' + ext;
                 a.click();
             } else {
                 // 複数枚の場合はZIP
@@ -1232,7 +1347,8 @@
                 
                 for (const index of selectedImageIndexes) {
                     const result = processedImages[index];
-                    const fileName = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed.jpg';
+                    const ext = result.format === 'PNG' ? '.png' : '.jpg';
+                    const fileName = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed' + ext;
                     zip.file(fileName, result.processedBlob);
                 }
                 
@@ -1250,7 +1366,8 @@
             const zip = new JSZip();
             
             for (const result of processedImages) {
-                const fileName = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed.jpg';
+                const ext = result.format === 'PNG' ? '.png' : '.jpg';
+                const fileName = result.originalFile.name.replace(/\.[^/.]+$/, '') + '_processed' + ext;
                 zip.file(fileName, result.processedBlob);
             }
             
